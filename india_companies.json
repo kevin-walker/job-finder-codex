@@ -1,0 +1,479 @@
+{
+  "generated": "2026-06-10T06:40:40.120065+00:00",
+  "companies": [
+    {
+      "name": "Okta",
+      "ats": "greenhouse",
+      "token": "okta",
+      "india_roles_seen": 88
+    },
+    {
+      "name": "HighLevel / GoHighLevel",
+      "ats": "lever",
+      "token": "gohighlevel",
+      "india_roles_seen": 82
+    },
+    {
+      "name": "Databricks",
+      "ats": "greenhouse",
+      "token": "databricks",
+      "india_roles_seen": 72
+    },
+    {
+      "name": "Pure Storage",
+      "ats": "greenhouse",
+      "token": "purestorage",
+      "india_roles_seen": 69
+    },
+    {
+      "name": "MongoDB",
+      "ats": "greenhouse",
+      "token": "mongodb",
+      "india_roles_seen": 54
+    },
+    {
+      "name": "PhonePe",
+      "ats": "greenhouse",
+      "token": "phonepe",
+      "india_roles_seen": 52
+    },
+    {
+      "name": "InMobi",
+      "ats": "greenhouse",
+      "token": "inmobi",
+      "india_roles_seen": 52
+    },
+    {
+      "name": "Stripe",
+      "ats": "greenhouse",
+      "token": "stripe",
+      "india_roles_seen": 44
+    },
+    {
+      "name": "Razorpay",
+      "ats": "greenhouse",
+      "token": "razorpaysoftwareprivatelimited",
+      "india_roles_seen": 37
+    },
+    {
+      "name": "Rubrik",
+      "ats": "greenhouse",
+      "token": "rubrik",
+      "india_roles_seen": 30
+    },
+    {
+      "name": "Harness",
+      "ats": "greenhouse",
+      "token": "harnessinc",
+      "india_roles_seen": 28
+    },
+    {
+      "name": "Smartsheet",
+      "ats": "greenhouse",
+      "token": "smartsheet",
+      "india_roles_seen": 27
+    },
+    {
+      "name": "New Relic",
+      "ats": "greenhouse",
+      "token": "newrelic",
+      "india_roles_seen": 23
+    },
+    {
+      "name": "HackerRank",
+      "ats": "greenhouse",
+      "token": "hackerrank",
+      "india_roles_seen": 23
+    },
+    {
+      "name": "GitLab",
+      "ats": "greenhouse",
+      "token": "gitlab",
+      "india_roles_seen": 21
+    },
+    {
+      "name": "Atomicwork",
+      "ats": "greenhouse",
+      "token": "atomicwork",
+      "india_roles_seen": 21
+    },
+    {
+      "name": "Netskope",
+      "ats": "greenhouse",
+      "token": "netskope",
+      "india_roles_seen": 20
+    },
+    {
+      "name": "JFrog",
+      "ats": "greenhouse",
+      "token": "jfrog",
+      "india_roles_seen": 19
+    },
+    {
+      "name": "Nasuni",
+      "ats": "greenhouse",
+      "token": "nasuni",
+      "india_roles_seen": 19
+    },
+    {
+      "name": "Roblox",
+      "ats": "greenhouse",
+      "token": "roblox",
+      "india_roles_seen": 17
+    },
+    {
+      "name": "Postman",
+      "ats": "greenhouse",
+      "token": "postman",
+      "india_roles_seen": 15
+    },
+    {
+      "name": "YugabyteDB",
+      "ats": "greenhouse",
+      "token": "yugabyte",
+      "india_roles_seen": 15
+    },
+    {
+      "name": "Airbnb",
+      "ats": "greenhouse",
+      "token": "airbnb",
+      "india_roles_seen": 14
+    },
+    {
+      "name": "Abnormal Security",
+      "ats": "greenhouse",
+      "token": "abnormalsecurity",
+      "india_roles_seen": 14
+    },
+    {
+      "name": "Twilio",
+      "ats": "greenhouse",
+      "token": "twilio",
+      "india_roles_seen": 13
+    },
+    {
+      "name": "Fivetran",
+      "ats": "greenhouse",
+      "token": "fivetran",
+      "india_roles_seen": 13
+    },
+    {
+      "name": "CommVault",
+      "ats": "greenhouse",
+      "token": "commvault",
+      "india_roles_seen": 13
+    },
+    {
+      "name": "Sumo Logic",
+      "ats": "greenhouse",
+      "token": "sumologic",
+      "india_roles_seen": 12
+    },
+    {
+      "name": "Zuora",
+      "ats": "greenhouse",
+      "token": "zuora",
+      "india_roles_seen": 12
+    },
+    {
+      "name": "Druva",
+      "ats": "greenhouse",
+      "token": "druva",
+      "india_roles_seen": 12
+    },
+    {
+      "name": "ClickHouse",
+      "ats": "greenhouse",
+      "token": "clickhouse",
+      "india_roles_seen": 11
+    },
+    {
+      "name": "Showpad",
+      "ats": "greenhouse",
+      "token": "showpad",
+      "india_roles_seen": 11
+    },
+    {
+      "name": "Harvey",
+      "ats": "ashby",
+      "token": "harvey",
+      "india_roles_seen": 11
+    },
+    {
+      "name": "Unity",
+      "ats": "greenhouse",
+      "token": "unity3d",
+      "india_roles_seen": 10
+    },
+    {
+      "name": "Kong",
+      "ats": "ashby",
+      "token": "kong",
+      "india_roles_seen": 10
+    },
+    {
+      "name": "SingleStore",
+      "ats": "greenhouse",
+      "token": "singlestore",
+      "india_roles_seen": 9
+    },
+    {
+      "name": "Datadog",
+      "ats": "greenhouse",
+      "token": "datadog",
+      "india_roles_seen": 8
+    },
+    {
+      "name": "OpenAI",
+      "ats": "ashby",
+      "token": "openai",
+      "india_roles_seen": 8
+    },
+    {
+      "name": "HackerOne",
+      "ats": "ashby",
+      "token": "hackerone",
+      "india_roles_seen": 8
+    },
+    {
+      "name": "LaunchDarkly",
+      "ats": "greenhouse",
+      "token": "launchdarkly",
+      "india_roles_seen": 7
+    },
+    {
+      "name": "Cockroach Labs",
+      "ats": "greenhouse",
+      "token": "cockroachlabs",
+      "india_roles_seen": 6
+    },
+    {
+      "name": "Vonage",
+      "ats": "greenhouse",
+      "token": "vonage",
+      "india_roles_seen": 6
+    },
+    {
+      "name": "Samsara",
+      "ats": "greenhouse",
+      "token": "samsara",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "Elastic",
+      "ats": "greenhouse",
+      "token": "elastic",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "Starburst",
+      "ats": "greenhouse",
+      "token": "starburst",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "Fastly",
+      "ats": "greenhouse",
+      "token": "fastly",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "OPSWAT",
+      "ats": "greenhouse",
+      "token": "opswat",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "Menlo Security",
+      "ats": "ashby",
+      "token": "menlosecurity",
+      "india_roles_seen": 5
+    },
+    {
+      "name": "Scale AI",
+      "ats": "greenhouse",
+      "token": "scaleai",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Spotify",
+      "ats": "lever",
+      "token": "spotify",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Notion",
+      "ats": "ashby",
+      "token": "notion",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Deliveroo",
+      "ats": "ashby",
+      "token": "deliveroo",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Zapier",
+      "ats": "ashby",
+      "token": "zapier",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Cube Dev",
+      "ats": "ashby",
+      "token": "cube",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Outreach",
+      "ats": "lever",
+      "token": "outreach",
+      "india_roles_seen": 4
+    },
+    {
+      "name": "Figma",
+      "ats": "greenhouse",
+      "token": "figma",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "Mixpanel",
+      "ats": "greenhouse",
+      "token": "mixpanel",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "KnowBe4",
+      "ats": "greenhouse",
+      "token": "knowbe4",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "Gainsight",
+      "ats": "ashby",
+      "token": "gainsight",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "Atlan",
+      "ats": "ashby",
+      "token": "atlan",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "Nirmata",
+      "ats": "greenhouse",
+      "token": "nirmata",
+      "india_roles_seen": 3
+    },
+    {
+      "name": "Coinbase",
+      "ats": "greenhouse",
+      "token": "coinbase",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Wrike",
+      "ats": "greenhouse",
+      "token": "wrike",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Cloudflare",
+      "ats": "greenhouse",
+      "token": "cloudflare",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "PingCAP / TiDB",
+      "ats": "greenhouse",
+      "token": "pingcap",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Hightouch",
+      "ats": "greenhouse",
+      "token": "hightouch",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "StarTree",
+      "ats": "greenhouse",
+      "token": "startree",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Everbridge",
+      "ats": "lever",
+      "token": "everbridge",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Cognition (Devin)",
+      "ats": "ashby",
+      "token": "cognition",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "ElevenLabs",
+      "ats": "ashby",
+      "token": "elevenlabs",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Temporal (Ashby)",
+      "ats": "ashby",
+      "token": "temporal",
+      "india_roles_seen": 2
+    },
+    {
+      "name": "Anthropic",
+      "ats": "greenhouse",
+      "token": "anthropic",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Block",
+      "ats": "greenhouse",
+      "token": "block",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Salesloft",
+      "ats": "greenhouse",
+      "token": "salesloft",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Temporal Technologies",
+      "ats": "greenhouse",
+      "token": "temporaltechnologies",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Cribl",
+      "ats": "greenhouse",
+      "token": "cribl",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Amplitude",
+      "ats": "greenhouse",
+      "token": "amplitude",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "Binance",
+      "ats": "lever",
+      "token": "binance",
+      "india_roles_seen": 1
+    },
+    {
+      "name": "TechGrove (Banyan)",
+      "ats": "greenhouse",
+      "token": "techgrovebybanyansoftware",
+      "india_roles_seen": 1
+    }
+  ]
+}
