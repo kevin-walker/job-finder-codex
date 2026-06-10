@@ -1,0 +1,4 @@
+requests[socks]
+python-dateutil
+openpyxl
+truststore

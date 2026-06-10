@@ -42,6 +42,7 @@ except ImportError:
 
 import certifi
 import requests
+import socket as _socket
 from dateutil import parser as dateparser
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -280,37 +281,66 @@ def fetch_workday(name, token):
     tenant, wdv, career_path = parts
     api_url = f"https://{tenant}.{wdv}.myworkdayjobs.com/wday/cxs/{tenant}/{career_path}/jobs"
 
-    out, offset, limit = [], 0, 20
-    while True:
-        r = requests.post(api_url,
-                          json={"limit": limit, "offset": offset, "searchText": ""},
+    # For large companies (>300 total), targeted city-keyword passes are faster
+    # than paginating thousands of global results.
+    _WD_LARGE_THRESHOLD = 300
+    _WD_INDIA_QUERIES = ["India", "Bengaluru", "Hyderabad", "Pune"]
+
+    def _fetch_pages(search_text, max_jobs=300):
+        results, off, lim = [], 0, 20
+        while off < max_jobs:
+            r = requests.post(api_url,
+                              json={"limit": lim, "offset": off, "searchText": search_text},
+                              headers=HEADERS, timeout=REQUEST_TIMEOUT, verify=_SSL)
+            r.raise_for_status()
+            data = r.json()
+            postings = data.get("jobPostings") or []
+            total_ = data.get("total") or 0
+            results.extend(postings)
+            if off + lim >= total_ or not postings:
+                break
+            off += lim
+        return results
+
+    # Probe total with empty query
+    probe = requests.post(api_url, json={"limit": 1, "offset": 0, "searchText": ""},
                           headers=HEADERS, timeout=REQUEST_TIMEOUT, verify=_SSL)
-        r.raise_for_status()
-        data = r.json()
-        postings = data.get("jobPostings") or []
-        total = data.get("total") or 0
-        for j in postings:
-            ext_path = j.get("externalPath") or ""
-            if not _workday_path_is_india_apac(ext_path):
-                continue
-            posted_dt = _parse_workday_date(j.get("postedOn") or "")
-            loc_text = (j.get("locationsText") or "").strip()
-            # locationsText is often "2 Locations" — derive real name from path instead
-            if not loc_text or loc_text[0].isdigit():
-                loc_text = _workday_path_location(ext_path)
-            link = f"https://{tenant}.{wdv}.myworkdayjobs.com/en-US/{career_path}{ext_path}"
-            out.append({
-                "role": (j.get("title") or "").strip(),
-                "company": name,
-                "location": loc_text,
-                "posted_dt": posted_dt,
-                "source": "Workday",
-                "link": link,
-                "age_known": posted_dt is not None,
-            })
-        if offset + limit >= total or not postings:
-            break
-        offset += limit
+    probe.raise_for_status()
+    grand_total = probe.json().get("total") or 0
+
+    if grand_total > _WD_LARGE_THRESHOLD:
+        # Large company: targeted city searches (60 results each) instead of full scan
+        seen_paths: set = set()
+        raw_postings = []
+        for q in _WD_INDIA_QUERIES:
+            for p in _fetch_pages(q, max_jobs=60):
+                ep = p.get("externalPath") or ""
+                if ep not in seen_paths:
+                    seen_paths.add(ep)
+                    raw_postings.append(p)
+    else:
+        raw_postings = _fetch_pages("", max_jobs=grand_total or 300)
+
+    out = []
+    for j in raw_postings:
+        ext_path = j.get("externalPath") or ""
+        if not _workday_path_is_india_apac(ext_path):
+            continue
+        posted_dt = _parse_workday_date(j.get("postedOn") or "")
+        loc_text = (j.get("locationsText") or "").strip()
+        # locationsText is often "2 Locations" — derive real name from path instead
+        if not loc_text or loc_text[0].isdigit():
+            loc_text = _workday_path_location(ext_path)
+        link = f"https://{tenant}.{wdv}.myworkdayjobs.com/en-US/{career_path}{ext_path}"
+        out.append({
+            "role": (j.get("title") or "").strip(),
+            "company": name,
+            "location": loc_text,
+            "posted_dt": posted_dt,
+            "source": "Workday",
+            "link": link,
+            "age_known": posted_dt is not None,
+        })
     return out
 
 
@@ -808,26 +838,84 @@ _DDG_NOISE_TOKENS = {
 _WD_MIN_TENANT_LEN = 3
 
 
-def _ddg_search_ats_tokens(ats, query):
+# ---------------------------------------------------------------------------
+# Tor helpers — used by --discover-web to rotate exit-node IP between queries.
+# Requires: brew install tor  +  pip3 install requests[socks]
+# Start Tor before running: tor --ControlPort 9051 --CookieAuthentication 0
+# ---------------------------------------------------------------------------
+_TOR_SOCKS   = "socks5h://127.0.0.1:9050"   # h = DNS resolution inside Tor
+_TOR_CONTROL = ("127.0.0.1", 9051)
+
+
+def _tor_running() -> bool:
+    """Return True if Tor's SOCKS port is accepting connections."""
+    try:
+        s = _socket.create_connection(("127.0.0.1", 9050), timeout=2)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _tor_new_identity() -> bool:
+    """Send NEWNYM to the Tor control port to rotate the exit-node IP.
+
+    Returns True on success. Sleeps 5 s after sending so the new circuit
+    is ready before the next request goes out.
+    """
+    try:
+        s = _socket.create_connection(_TOR_CONTROL, timeout=5)
+        s.sendall(b"AUTHENTICATE \"\"\r\nSIGNAL NEWNYM\r\nQUIT\r\n")
+        s.close()
+        time.sleep(5)   # Tor needs a moment to build the new circuit
+        return True
+    except OSError:
+        return False
+
+
+def _make_tor_session() -> requests.Session:
+    """Return a requests.Session pre-configured to route through Tor."""
+    s = requests.Session()
+    s.proxies = {"http": _TOR_SOCKS, "https": _TOR_SOCKS}
+    return s
+
+
+_DDG_USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+]
+_ddg_ua_index = 0
+
+def _ddg_search_ats_tokens(ats, query, _session=None):
     """Query DuckDuckGo HTML and extract ATS board tokens from result URLs.
 
     Returns a set of token strings. For Greenhouse/Lever/Ashby the token is a
     simple slug. For Workday the token is the composite "tenant/wdX/career_path"
     string used by fetch_workday().
+
+    Pass a requests.Session as _session to persist DDG cookies across calls,
+    which reduces rate-limit likelihood.
     """
+    global _ddg_ua_index
     pattern = _ATS_URL_PATTERNS.get(ats)
     if not pattern:
         return set()
+    ua = _DDG_USER_AGENTS[_ddg_ua_index % len(_DDG_USER_AGENTS)]
+    _ddg_ua_index += 1
+    http = _session if _session is not None else requests
     try:
-        r = requests.get(
+        r = http.get(
             "https://html.duckduckgo.com/html/",
             params={"q": query, "kl": "in-en"},
             headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": ua,
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://duckduckgo.com/",
             },
             timeout=20,
             verify=_SSL,
@@ -856,6 +944,55 @@ def _ddg_search_ats_tokens(ats, query):
         return set()
 
 
+def _bing_search_ats_tokens(ats, query, _session=None):
+    """Query Bing HTML and extract ATS board tokens from result URLs.
+
+    Same token extraction logic as _ddg_search_ats_tokens but hits Bing's
+    search endpoint. Bing and DDG have independent rate-limit counters, so
+    running both doubles coverage when one engine is blocked.
+    """
+    global _ddg_ua_index
+    pattern = _ATS_URL_PATTERNS.get(ats)
+    if not pattern:
+        return set()
+    ua = _DDG_USER_AGENTS[_ddg_ua_index % len(_DDG_USER_AGENTS)]
+    _ddg_ua_index += 1
+    http = _session if _session is not None else requests
+    try:
+        r = http.get(
+            "https://www.bing.com/search",
+            params={"q": query, "setlang": "en", "cc": "IN"},
+            headers={
+                "User-Agent": ua,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.bing.com/",
+            },
+            timeout=20,
+            verify=_SSL,
+        )
+        if ats == "workday":
+            tokens = set()
+            for m in pattern.finditer(r.text):
+                tenant = m.group(1).lower()
+                wdv    = m.group(2).lower()
+                path   = m.group(3)
+                if (len(tenant) < _WD_MIN_TENANT_LEN
+                        or tenant in _DDG_NOISE_TOKENS
+                        or path.lower() in _DDG_NOISE_TOKENS):
+                    continue
+                tokens.add(f"{tenant}/{wdv}/{path}")
+            return tokens
+        else:
+            return set(
+                m.group(1).lower()
+                for m in pattern.finditer(r.text)
+                if m.group(1).lower() not in _DDG_NOISE_TOKENS
+            )
+    except Exception:
+        return set()
+
+
 def mode_discover_web():
     """Search DuckDuckGo for companies posting India DevOps/SRE/Support jobs on all four
     ATS platforms (Greenhouse / Lever / Ashby / Workday).  Found tokens are tested against
@@ -869,19 +1006,54 @@ def mode_discover_web():
     candidates = []
     seen = set()
 
+    # Use Tor for IP rotation if it's running, otherwise fall back to plain sessions.
+    use_tor = _tor_running()
+    if use_tor:
+        print("  Tor detected — rotating exit-node IP between each engine call.\n")
+        ddg_session  = _make_tor_session()
+        bing_session = _make_tor_session()
+    else:
+        print("  Tor not running — using direct connection (start Tor to rotate IPs).\n")
+        ddg_session  = requests.Session()
+        bing_session = requests.Session()
+
+    # Warm up both engines so sessions carry real cookies before firing searches.
+    for warmup_url, sess, ua in [
+        ("https://duckduckgo.com/", ddg_session,  _DDG_USER_AGENTS[0]),
+        ("https://www.bing.com/",   bing_session, _DDG_USER_AGENTS[1]),
+    ]:
+        try:
+            sess.get(warmup_url, timeout=10, headers={"User-Agent": ua}, verify=_SSL)
+        except Exception:
+            pass
+
     for ats, query in _DISCOVER_QUERIES:
-        short_q = query[:60]
+        short_q = query[:55]
         print(f"  [{ats:11s}] {short_q}...", end=" ", flush=True)
-        tokens = _ddg_search_ats_tokens(ats, query)
+
+        ddg_tokens  = _ddg_search_ats_tokens(ats, query, _session=ddg_session)
+        if use_tor:
+            _tor_new_identity()
+            ddg_session = _make_tor_session()
+        else:
+            time.sleep(2.0)
+
+        bing_tokens = _bing_search_ats_tokens(ats, query, _session=bing_session)
+        if use_tor:
+            _tor_new_identity()
+            bing_session = _make_tor_session()
+        else:
+            time.sleep(2.0)
+
+        tokens = ddg_tokens | bing_tokens
         new_t = [t for t in tokens if (ats, t) not in existing_tokens and t not in seen]
         for t in new_t:
             seen.add(t)
             candidates.append((f"[web] {t}", ats, t))
-        print(f"{len(tokens)} found, {len(new_t)} new")
-        time.sleep(1.8)   # polite pause between DDG requests
+        print(f"DDG:{len(ddg_tokens)} Bing:{len(bing_tokens)} new:{len(new_t)}")
 
     if not candidates:
-        print("\n  No new candidates found. Try again later (DDG rate-limits heavy use).")
+        print("\n  No new candidates found. Both DDG and Bing returned nothing — try again later (rate limits) or start Tor.")
         return
 
     print(f"\n  Testing {len(candidates)} candidates against ATS APIs...\n")
@@ -930,6 +1102,91 @@ def mode_discover_web():
     print("  Run '--clean-registry --yes' periodically to prune dead tokens.")
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Workday path finder — brute-force the correct career_path for a known tenant
+# ───────────────────────────────────────────────────────────────────────────
+
+# Tried in order; first that returns HTTP 200 wins.
+_WD_PATH_CANDIDATES = [
+    "External",
+    "external",
+    "Careers",
+    "careers",
+    "Global",
+    "GlobalCareers",
+    "CareerSite",
+    # tenant-named paths are added dynamically per company
+]
+
+# Additional company-specific guesses appended for each tenant
+def _wd_path_guesses(tenant):
+    t = tenant.lower().replace("-", "").replace("_", "")
+    cap = t.capitalize()
+    return _WD_PATH_CANDIDATES + [
+        t,
+        cap,
+        f"{cap}Careers",
+        f"{t}careers",
+        f"{cap}_Tech",
+        f"{cap}_Careers",
+        f"{cap}External",
+        f"{cap}GlobalCareers",
+        "India",
+        "IndiaCareers",
+    ]
+
+
+def mode_find_workday_path(spec):
+    """Try every common career_path for a Workday tenant and show which work.
+
+    Usage:  python jobpull.py --find-workday-path tenant/wdX
+    Example: python jobpull.py --find-workday-path infosys/wd5
+
+    Useful when you see a 422 error (tenant+wdX is correct but career_path is wrong).
+    Prints working tokens and how many India/APAC jobs each returns.
+    """
+    parts = spec.strip().split("/")
+    if len(parts) != 2:
+        print(f"Usage: python jobpull.py --find-workday-path tenant/wdX")
+        print(f"  e.g. --find-workday-path infosys/wd5")
+        return
+
+    tenant, wdv = parts[0].lower(), parts[1].lower()
+    guesses = _wd_path_guesses(tenant)
+    total = len(guesses)
+    print(f"Probing {tenant}.{wdv}.myworkdayjobs.com with {total} career_path candidates...\n")
+
+    hits = []
+    for path in guesses:
+        token = f"{tenant}/{wdv}/{path}"
+        entry = (f"[probe] {path}", "workday", token)
+        _, jobs, err = safe_fetch(entry)
+        if err:
+            status = "✗"
+        else:
+            india = [j for j in jobs if location_ok_for_scan(j["location"])]
+            kw    = [j for j in india if matches_keywords(j["role"])]
+            status = f"✓  {len(jobs):4d} total  {len(india):3d} India  {len(kw):3d} KW"
+            hits.append((path, token, len(jobs), len(india), len(kw)))
+        print(f"  {path:<30s}  {status}")
+
+    if not hits:
+        print(f"\n  No working paths found for {tenant}/{wdv}.")
+        print("  The tenant may use a different wdX (try wd1/wd3/wd5) or block automated access.")
+        return
+
+    print(f"\n  Working tokens:")
+    for path, token, n, india, kw in sorted(hits, key=lambda x: -x[3]):
+        print(f"    {token}  →  {n} total, {india} India, {kw} KW")
+
+    best = max(hits, key=lambda x: (x[3], x[2]))
+    best_token = best[1]
+    display = tenant.replace("-", " ").title()
+    print(f"\n  Best candidate: {best_token}")
+    print(f"  To add to registry:")
+    print(f'    python jobpull.py --add-company "{display}|workday|{best_token}"')
+
+
 if __name__ == "__main__":
     if "--verify" in sys.argv:
         mode_verify()
@@ -943,6 +1200,13 @@ if __name__ == "__main__":
             print("Usage: python jobpull.py --add-company 'DisplayName|ats|token'")
         else:
             mode_add_company(sys.argv[idx + 1])
+    elif "--find-workday-path" in sys.argv:
+        idx = sys.argv.index("--find-workday-path")
+        if idx + 1 >= len(sys.argv):
+            print("Usage: python jobpull.py --find-workday-path tenant/wdX")
+            print("  e.g.  python jobpull.py --find-workday-path infosys/wd5")
+        else:
+            mode_find_workday_path(sys.argv[idx + 1])
     elif "--smoke-test" in sys.argv:
         mode_smoke_test()
     elif "--discover-web" in sys.argv:
