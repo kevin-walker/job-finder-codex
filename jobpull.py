@@ -129,6 +129,9 @@ except ImportError:
     sys.exit(1)
 
 
+_IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
+
+
 def _now_utc():
     return dt.datetime.now(dt.timezone.utc)
 
@@ -430,9 +433,17 @@ def write_excel(jobs, path):
     now = _now_utc()
     for j in jobs:
         if j["posted_dt"]:
-            posted_str = j["posted_dt"].strftime("%Y-%m-%d %H:%M UTC")
+            ist_dt = j["posted_dt"].astimezone(_IST)
+            posted_str = ist_dt.strftime("%d %b %Y  %I:%M %p IST")
             hrs = (now - j["posted_dt"]).total_seconds() / 3600
-            age_str = f"{hrs:.1f}h ago" if hrs >= 0 else "future?"
+            if hrs < 1:
+                age_str = f"{int(hrs * 60)}m ago"
+            elif hrs < 24:
+                age_str = f"{hrs:.0f}h ago"
+            elif hrs < 48:
+                age_str = "1d ago"
+            else:
+                age_str = f"{hrs / 24:.0f}d ago"
         else:
             posted_str, age_str = "unknown", "age n/a"
         ws.append([j["role"], j["company"], j["location"],
@@ -549,7 +560,7 @@ def mode_scan():
         print("  No matches. Widen HOURS_BACK or KEYWORDS, or run --discover to refresh.")
         return
 
-    out_path = f"{OUTPUT_PREFIX}_{dt.date.today().isoformat()}.xlsx"
+    out_path = f"{OUTPUT_PREFIX}_{dt.datetime.now(_IST).strftime('%Y-%m-%d_%H%M')}.xlsx"
     write_excel(filtered, out_path)
     print(f"  Wrote {len(filtered)} jobs -> {out_path}\n")
     for j in filtered[:12]:
@@ -743,6 +754,135 @@ def mode_smoke_test():
     print(f"\n{'All systems go.' if all_ok else 'Some ATSes failed — check tokens.'}")
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Web discovery — find new company ATS tokens via DuckDuckGo
+# ───────────────────────────────────────────────────────────────────────────
+
+_ATS_URL_PATTERNS = {
+    "greenhouse": _re.compile(r"boards\.greenhouse\.io/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
+    "lever":      _re.compile(r"jobs\.lever\.co/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
+    "ashby":      _re.compile(r"jobs\.ashbyhq\.com/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
+}
+
+_DISCOVER_QUERIES = [
+    ("greenhouse", 'site:boards.greenhouse.io "devops engineer" "india"'),
+    ("greenhouse", 'site:boards.greenhouse.io "support engineer" "bangalore"'),
+    ("greenhouse", 'site:boards.greenhouse.io "site reliability" "india"'),
+    ("greenhouse", 'site:boards.greenhouse.io "platform engineer" "india"'),
+    ("greenhouse", 'site:boards.greenhouse.io "cloud engineer" "india"'),
+    ("lever",      'site:jobs.lever.co "devops" "india"'),
+    ("lever",      'site:jobs.lever.co "support engineer" "bangalore"'),
+    ("lever",      'site:jobs.lever.co "site reliability" "india"'),
+    ("lever",      'site:jobs.lever.co "platform engineer" "india"'),
+    ("ashby",      'site:jobs.ashbyhq.com "devops" "india"'),
+    ("ashby",      'site:jobs.ashbyhq.com "support engineer" "india"'),
+    ("ashby",      'site:jobs.ashbyhq.com "site reliability" "india"'),
+]
+
+_DDG_NOISE_TOKENS = {
+    "embed", "job_board", "api", "jobs", "all", "careers", "career",
+    "search", "apply", "content", "index", "js", "css",
+}
+
+
+def _ddg_search_ats_tokens(ats, query):
+    """Query DuckDuckGo HTML and extract ATS board tokens from result URLs."""
+    pattern = _ATS_URL_PATTERNS.get(ats)
+    if not pattern:
+        return set()
+    try:
+        r = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query, "kl": "in-en"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=20,
+            verify=_SSL,
+        )
+        tokens = set(
+            m.group(1).lower()
+            for m in pattern.finditer(r.text)
+            if m.group(1).lower() not in _DDG_NOISE_TOKENS
+        )
+        return tokens
+    except Exception:
+        return set()
+
+
+def mode_discover_web():
+    """Search DuckDuckGo for companies posting India DevOps/SRE/Support jobs on public
+    ATS boards (Greenhouse / Lever / Ashby).  Found tokens are tested against the real
+    APIs; only companies with actual India/APAC jobs are written into registry.py.
+
+    Usage:  python jobpull.py --discover-web
+    """
+    print("Web discovery: searching for India DevOps/SRE/Support roles on public ATS boards...\n")
+
+    existing_tokens = {(a, t.lower()) for _, a, t in SEED}
+    candidates = []
+    seen = set()
+
+    for ats, query in _DISCOVER_QUERIES:
+        short_q = query[:60]
+        print(f"  [{ats:11s}] {short_q}...", end=" ", flush=True)
+        tokens = _ddg_search_ats_tokens(ats, query)
+        new_t = [t for t in tokens if (ats, t) not in existing_tokens and t not in seen]
+        for t in new_t:
+            seen.add(t)
+            candidates.append((f"[web] {t}", ats, t))
+        print(f"{len(tokens)} found, {len(new_t)} new")
+        time.sleep(1.8)   # polite pause between DDG requests
+
+    if not candidates:
+        print("\n  No new candidates found. Try again later (DDG rate-limits heavy use).")
+        return
+
+    print(f"\n  Testing {len(candidates)} candidates against ATS APIs...\n")
+
+    to_add = []
+    done = 0
+    total = len(candidates)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(safe_fetch, c): c for c in candidates}
+        for fut in as_completed(futures):
+            entry, jobs, err = fut.result()
+            done += 1
+            print(f"\r  Scanning: {done}/{total}", end="", flush=True)
+            if err or not jobs:
+                continue
+            token = entry[2]
+            india = [j for j in jobs if location_ok_for_scan(j["location"])]
+            if not india:
+                continue
+            kw_count = sum(1 for j in india if matches_keywords(j["role"]))
+            display = token.replace("-", " ").replace("_", " ").title()
+            to_add.append((display, entry[1], token, len(india), kw_count))
+    print()
+
+    if not to_add:
+        print("  Candidates found but none have India/APAC jobs right now.")
+        return
+
+    to_add.sort(key=lambda x: (-x[4], -x[3]))
+    print(f"\n  {len(to_add)} new companies with India jobs:\n")
+    for display, ats, token, india_n, kw_n in to_add:
+        star = "**" if kw_n > 0 else "  "
+        print(f"  {star} {display:32s} ({ats:11s}) "
+              f"— {india_n} India/APAC jobs, {kw_n} keyword-match")
+
+    import importlib, registry as _reg_mod
+    importlib.reload(_reg_mod)
+    new_seed = list(_reg_mod.SEED) + [(d, a, t) for d, a, t, _, _ in to_add]
+    _rewrite_registry(new_seed)
+    print(f"\n  Added {len(to_add)} companies. Registry total: {len(new_seed)}.")
+    print("  Run '--clean-registry --yes' periodically to prune dead tokens.")
+
+
 if __name__ == "__main__":
     if "--verify" in sys.argv:
         mode_verify()
@@ -758,5 +898,7 @@ if __name__ == "__main__":
             mode_add_company(sys.argv[idx + 1])
     elif "--smoke-test" in sys.argv:
         mode_smoke_test()
+    elif "--discover-web" in sys.argv:
+        mode_discover_web()
     else:
         mode_scan()
