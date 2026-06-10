@@ -560,9 +560,14 @@ def mode_scan():
         print("  No matches. Widen HOURS_BACK or KEYWORDS, or run --discover to refresh.")
         return
 
-    out_path = f"{OUTPUT_PREFIX}_{dt.datetime.now(_IST).strftime('%Y-%m-%d_%H%M')}.xlsx"
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job_postings_results")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+        print(f"  Created output folder: job_postings_results/")
+    out_path = os.path.join(out_dir,
+                            f"{OUTPUT_PREFIX}_{dt.datetime.now(_IST).strftime('%Y-%m-%d_%H%M')}.xlsx")
     write_excel(filtered, out_path)
-    print(f"  Wrote {len(filtered)} jobs -> {out_path}\n")
+    print(f"  Wrote {len(filtered)} jobs -> job_postings_results/{os.path.basename(out_path)}\n")
     for j in filtered[:12]:
         age = ""
         if j["posted_dt"]:
@@ -762,6 +767,13 @@ _ATS_URL_PATTERNS = {
     "greenhouse": _re.compile(r"boards\.greenhouse\.io/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
     "lever":      _re.compile(r"jobs\.lever\.co/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
     "ashby":      _re.compile(r"jobs\.ashbyhq\.com/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})"),
+    # Workday public career-site URLs: tenant.wdX.myworkdayjobs.com/en-US/career_path/...
+    # Captures (tenant, wdX, career_path) — assembled into "tenant/wdX/career_path" token.
+    "workday":    _re.compile(
+        r"([a-z0-9][a-z0-9-]{1,30})\.(wd\d+)\.myworkdayjobs\.com"
+        r"/[a-zA-Z]{2}-[a-zA-Z]{2}/([a-zA-Z0-9][a-zA-Z0-9_-]{1,60})",
+        _re.I,
+    ),
 }
 
 _DISCOVER_QUERIES = [
@@ -777,16 +789,32 @@ _DISCOVER_QUERIES = [
     ("ashby",      'site:jobs.ashbyhq.com "devops" "india"'),
     ("ashby",      'site:jobs.ashbyhq.com "support engineer" "india"'),
     ("ashby",      'site:jobs.ashbyhq.com "site reliability" "india"'),
+    # Workday — searches the public job posting pages, not the API
+    ("workday",    'site:myworkdayjobs.com "devops engineer" "india"'),
+    ("workday",    'site:myworkdayjobs.com "support engineer" "bangalore"'),
+    ("workday",    'site:myworkdayjobs.com "site reliability engineer" "india"'),
+    ("workday",    'site:myworkdayjobs.com "platform engineer" "india"'),
 ]
 
 _DDG_NOISE_TOKENS = {
     "embed", "job_board", "api", "jobs", "all", "careers", "career",
     "search", "apply", "content", "index", "js", "css",
+    # Workday-specific noise: locale codes and internal path segments
+    "wday", "cxs", "en", "us",
 }
+
+# Workday career_path segments that are valid but very generic — keep them.
+# Tenant names shorter than 3 chars are likely noise.
+_WD_MIN_TENANT_LEN = 3
 
 
 def _ddg_search_ats_tokens(ats, query):
-    """Query DuckDuckGo HTML and extract ATS board tokens from result URLs."""
+    """Query DuckDuckGo HTML and extract ATS board tokens from result URLs.
+
+    Returns a set of token strings. For Greenhouse/Lever/Ashby the token is a
+    simple slug. For Workday the token is the composite "tenant/wdX/career_path"
+    string used by fetch_workday().
+    """
     pattern = _ATS_URL_PATTERNS.get(ats)
     if not pattern:
         return set()
@@ -804,20 +832,34 @@ def _ddg_search_ats_tokens(ats, query):
             timeout=20,
             verify=_SSL,
         )
-        tokens = set(
-            m.group(1).lower()
-            for m in pattern.finditer(r.text)
-            if m.group(1).lower() not in _DDG_NOISE_TOKENS
-        )
-        return tokens
+        if ats == "workday":
+            # Workday pattern captures (tenant, wdX, career_path) — 3 groups.
+            tokens = set()
+            for m in pattern.finditer(r.text):
+                tenant = m.group(1).lower()
+                wdv    = m.group(2).lower()
+                path   = m.group(3)          # preserve original case for path
+                if (len(tenant) < _WD_MIN_TENANT_LEN
+                        or tenant in _DDG_NOISE_TOKENS
+                        or path.lower() in _DDG_NOISE_TOKENS):
+                    continue
+                tokens.add(f"{tenant}/{wdv}/{path}")
+            return tokens
+        else:
+            tokens = set(
+                m.group(1).lower()
+                for m in pattern.finditer(r.text)
+                if m.group(1).lower() not in _DDG_NOISE_TOKENS
+            )
+            return tokens
     except Exception:
         return set()
 
 
 def mode_discover_web():
-    """Search DuckDuckGo for companies posting India DevOps/SRE/Support jobs on public
-    ATS boards (Greenhouse / Lever / Ashby).  Found tokens are tested against the real
-    APIs; only companies with actual India/APAC jobs are written into registry.py.
+    """Search DuckDuckGo for companies posting India DevOps/SRE/Support jobs on all four
+    ATS platforms (Greenhouse / Lever / Ashby / Workday).  Found tokens are tested against
+    the real APIs; only companies with actual India/APAC jobs are written into registry.py.
 
     Usage:  python jobpull.py --discover-web
     """
@@ -860,8 +902,13 @@ def mode_discover_web():
             if not india:
                 continue
             kw_count = sum(1 for j in india if matches_keywords(j["role"]))
-            display = token.replace("-", " ").replace("_", " ").title()
-            to_add.append((display, entry[1], token, len(india), kw_count))
+            ats = entry[1]
+            if ats == "workday":
+                # token is "tenant/wdX/career_path" — use tenant as display name
+                display = token.split("/")[0].replace("-", " ").title()
+            else:
+                display = token.replace("-", " ").replace("_", " ").title()
+            to_add.append((display, ats, token, len(india), kw_count))
     print()
 
     if not to_add:
