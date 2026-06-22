@@ -30,7 +30,7 @@ jobs:
       
       - name: Upload results as artifact
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: job-results
           path: job_postings_results/
@@ -41,7 +41,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add job_postings_results/
+          git add job_postings_results/ || true
           git commit -m "Job results - $(date)" || echo "No changes to commit"
           git push
         env:
@@ -95,7 +95,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add india_companies.json
+          git add india_companies.json || true
           git commit -m "Update india_companies.json cache" || echo "No changes"
           git push
         env:
