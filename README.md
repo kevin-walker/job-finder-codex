@@ -53,7 +53,7 @@ The `job_postings_results/` folder is created automatically on first run.
 ```bash
 python3 jobpull.py --discover-web
 ```
-Searches DuckDuckGo for companies posting India DevOps/SRE/Support jobs on all four ATS platforms:
+Searches DuckDuckGo and Bing for companies posting India DevOps/SRE/Support jobs on all four ATS platforms. Google is used as a fallback when both return no ATS tokens:
 
 | ATS | Search pattern |
 |---|---|
@@ -66,6 +66,27 @@ Discovered tokens are tested against the real APIs. Only companies with confirme
 Workday URLs (`tenant.wdX.myworkdayjobs.com/en-US/career_path/...`) are parsed automatically into the correct composite token format.
 
 Run this periodically to grow the registry organically.
+
+### Recommended: Tavily Search API
+
+For reliable automated discovery, create Tavily's free-tier API key and keep it in
+your shell environment (never commit it to the repository):
+
+```bash
+export TAVILY_API_KEY="your-key"
+python3 jobpull.py --discover-web
+```
+
+When this variable is set, discovery uses Tavily's authenticated API instead of
+public search-result pages, so Tor is not required. `BRAVE_SEARCH_API_KEY` is
+also supported as an alternative, but Tavily takes precedence when both are set.
+
+If Tor is running but its current exit node is blocked by a search engine, bypass
+Tor for one discovery run without stopping it:
+
+```bash
+python3 jobpull.py --discover-web --direct
+```
 
 > **DuckDuckGo rate limits:** If all queries return 0, DDG has blocked your IP temporarily. Wait 30 minutes and try again, or use Tor for automatic IP rotation (see below).
 

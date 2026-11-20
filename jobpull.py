@@ -43,6 +43,7 @@ except ImportError:
 import certifi
 import requests
 import socket as _socket
+from urllib.parse import unquote
 from dateutil import parser as dateparser
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -90,7 +91,14 @@ INDIA_TERMS = [
     "india remote",
 ]
 
-# Remote APAC and Remote US are also included.
+# UAE roles are included in daily scans, but are deliberately kept separate
+# from India detection so discovery and its India-hiring report stay accurate.
+UAE_TERMS = [
+    "uae", "dubai",
+    "remote - uae", "remote, uae", "remote (uae)", "remote uae",
+]
+
+# Remote APAC roles are also included.
 APAC_REMOTE_TERMS = [
     "remote - apac", "remote, apac", "remote (apac)", "remote apac",
     "apac remote", "asia pacific", "asia-pacific",
@@ -416,8 +424,14 @@ def is_india(location):
     return _contains_any(location, INDIA_TERMS)
 
 
+def is_uae(location):
+    return _contains_any(location, UAE_TERMS)
+
+
 def location_ok_for_scan(location):
     if is_india(location):
+        return True
+    if is_uae(location):
         return True
     if _contains_any(location, APAC_REMOTE_TERMS):
         return True
@@ -782,7 +796,7 @@ def mode_smoke_test():
         else:
             india_jobs = [j for j in jobs if location_ok_for_scan(j["location"])]
             kw_jobs = [j for j in india_jobs if matches_keywords(j["role"])]
-            print(f"  OK    [{ats:11s}] {name}: {len(jobs)} total, {len(india_jobs)} India/APAC, {len(kw_jobs)} keyword-match")
+            print(f"  OK    [{ats:11s}] {name}: {len(jobs)} total, {len(india_jobs)} India/UAE/APAC, {len(kw_jobs)} keyword-match")
             for j in kw_jobs[:3]:
                 print(f"          {j['role'][:55]}  —  {j['location']}")
 
@@ -807,23 +821,34 @@ _ATS_URL_PATTERNS = {
 }
 
 _DISCOVER_QUERIES = [
-    ("greenhouse", 'site:boards.greenhouse.io "devops engineer" "india"'),
-    ("greenhouse", 'site:boards.greenhouse.io "support engineer" "bangalore"'),
-    ("greenhouse", 'site:boards.greenhouse.io "site reliability" "india"'),
-    ("greenhouse", 'site:boards.greenhouse.io "platform engineer" "india"'),
-    ("greenhouse", 'site:boards.greenhouse.io "cloud engineer" "india"'),
-    ("lever",      'site:jobs.lever.co "devops" "india"'),
-    ("lever",      'site:jobs.lever.co "support engineer" "bangalore"'),
-    ("lever",      'site:jobs.lever.co "site reliability" "india"'),
-    ("lever",      'site:jobs.lever.co "platform engineer" "india"'),
-    ("ashby",      'site:jobs.ashbyhq.com "devops" "india"'),
-    ("ashby",      'site:jobs.ashbyhq.com "support engineer" "india"'),
-    ("ashby",      'site:jobs.ashbyhq.com "site reliability" "india"'),
-    # Workday — searches the public job posting pages, not the API
-    ("workday",    'site:myworkdayjobs.com "devops engineer" "india"'),
-    ("workday",    'site:myworkdayjobs.com "support engineer" "bangalore"'),
-    ("workday",    'site:myworkdayjobs.com "site reliability engineer" "india"'),
-    ("workday",    'site:myworkdayjobs.com "platform engineer" "india"'),
+    # Search engines index job-location text much more reliably than every
+    # role title.  Candidates are fetched from the ATS API and filtered by
+    # KEYWORDS below, so keep these queries location-focused for better recall.
+    ("greenhouse", 'site:boards.greenhouse.io "India"'),
+    ("greenhouse", 'site:boards.greenhouse.io "Bangalore"'),
+    ("greenhouse", 'site:boards.greenhouse.io "Bengaluru"'),
+    ("greenhouse", 'site:boards.greenhouse.io "Hyderabad"'),
+    ("greenhouse", 'site:boards.greenhouse.io "United Arab Emirates"'),
+    ("greenhouse", 'site:boards.greenhouse.io "Dubai"'),
+    ("lever",      'site:jobs.lever.co "India"'),
+    ("lever",      'site:jobs.lever.co "Bangalore"'),
+    ("lever",      'site:jobs.lever.co "Bengaluru"'),
+    ("lever",      'site:jobs.lever.co "Hyderabad"'),
+    ("lever",      'site:jobs.lever.co "United Arab Emirates"'),
+    ("lever",      'site:jobs.lever.co "Dubai"'),
+    ("ashby",      'site:jobs.ashbyhq.com "India"'),
+    ("ashby",      'site:jobs.ashbyhq.com "Bangalore"'),
+    ("ashby",      'site:jobs.ashbyhq.com "Bengaluru"'),
+    ("ashby",      'site:jobs.ashbyhq.com "Hyderabad"'),
+    ("ashby",      'site:jobs.ashbyhq.com "United Arab Emirates"'),
+    ("ashby",      'site:jobs.ashbyhq.com "Dubai"'),
+    # Workday — searches the public job posting pages, not the API.
+    ("workday",    'site:myworkdayjobs.com "India"'),
+    ("workday",    'site:myworkdayjobs.com "Bangalore"'),
+    ("workday",    'site:myworkdayjobs.com "Bengaluru"'),
+    ("workday",    'site:myworkdayjobs.com "Hyderabad"'),
+    ("workday",    'site:myworkdayjobs.com "United Arab Emirates"'),
+    ("workday",    'site:myworkdayjobs.com "Dubai"'),
 ]
 
 _DDG_NOISE_TOKENS = {
@@ -865,7 +890,16 @@ def _tor_new_identity() -> bool:
     """
     try:
         s = _socket.create_connection(_TOR_CONTROL, timeout=5)
-        s.sendall(b"AUTHENTICATE \"\"\r\nSIGNAL NEWNYM\r\nQUIT\r\n")
+        s.settimeout(5)
+        s.sendall(b"AUTHENTICATE \"\"\r\n")
+        if not s.recv(1024).startswith(b"250"):
+            s.close()
+            return False
+        s.sendall(b"SIGNAL NEWNYM\r\n")
+        if not s.recv(1024).startswith(b"250"):
+            s.close()
+            return False
+        s.sendall(b"QUIT\r\n")
         s.close()
         time.sleep(5)   # Tor needs a moment to build the new circuit
         return True
@@ -889,6 +923,16 @@ _DDG_USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 _ddg_ua_index = 0
+_SEARCH_ERRORS = []
+BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+
+
+def _record_search_error(engine, ats, exc):
+    """Keep search failures visible instead of reporting them as zero results."""
+    message = f"{engine}/{ats}: {type(exc).__name__}: {str(exc)[:120]}"
+    if message not in _SEARCH_ERRORS:
+        _SEARCH_ERRORS.append(message)
 
 def _ddg_search_ats_tokens(ats, query, _session=None):
     """Query DuckDuckGo HTML and extract ATS board tokens from result URLs.
@@ -920,10 +964,17 @@ def _ddg_search_ats_tokens(ats, query, _session=None):
             timeout=20,
             verify=_SSL,
         )
+        r.raise_for_status()
+        if r.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP {r.status_code}")
+        # DuckDuckGo wraps result URLs in redirect links and percent-encodes
+        # them (for example, ``boards.greenhouse.io%2Fcompany``). Decode the
+        # response before applying the literal ATS URL patterns below.
+        page_text = unquote(r.text)
         if ats == "workday":
             # Workday pattern captures (tenant, wdX, career_path) — 3 groups.
             tokens = set()
-            for m in pattern.finditer(r.text):
+            for m in pattern.finditer(page_text):
                 tenant = m.group(1).lower()
                 wdv    = m.group(2).lower()
                 path   = m.group(3)          # preserve original case for path
@@ -936,11 +987,12 @@ def _ddg_search_ats_tokens(ats, query, _session=None):
         else:
             tokens = set(
                 m.group(1).lower()
-                for m in pattern.finditer(r.text)
+                for m in pattern.finditer(page_text)
                 if m.group(1).lower() not in _DDG_NOISE_TOKENS
             )
             return tokens
-    except Exception:
+    except Exception as exc:
+        _record_search_error("DDG", ats, exc)
         return set()
 
 
@@ -971,9 +1023,14 @@ def _bing_search_ats_tokens(ats, query, _session=None):
             timeout=20,
             verify=_SSL,
         )
+        r.raise_for_status()
+        if r.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP {r.status_code}")
+        # Some result links are percent-encoded, just like DuckDuckGo's.
+        page_text = unquote(r.text)
         if ats == "workday":
             tokens = set()
-            for m in pattern.finditer(r.text):
+            for m in pattern.finditer(page_text):
                 tenant = m.group(1).lower()
                 wdv    = m.group(2).lower()
                 path   = m.group(3)
@@ -986,36 +1043,168 @@ def _bing_search_ats_tokens(ats, query, _session=None):
         else:
             return set(
                 m.group(1).lower()
-                for m in pattern.finditer(r.text)
+                for m in pattern.finditer(page_text)
                 if m.group(1).lower() not in _DDG_NOISE_TOKENS
             )
-    except Exception:
+    except Exception as exc:
+        _record_search_error("Bing", ats, exc)
         return set()
 
 
-def mode_discover_web():
+def _google_search_ats_tokens(ats, query, _session=None):
+    """Fallback search provider, used only when DDG and Bing find no tokens."""
+    global _ddg_ua_index
+    pattern = _ATS_URL_PATTERNS.get(ats)
+    if not pattern:
+        return set()
+    ua = _DDG_USER_AGENTS[_ddg_ua_index % len(_DDG_USER_AGENTS)]
+    _ddg_ua_index += 1
+    http = _session if _session is not None else requests
+    try:
+        r = http.get(
+            "https://www.google.com/search",
+            params={"q": query, "hl": "en", "gl": "in"},
+            headers={
+                "User-Agent": ua,
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.google.com/",
+            },
+            timeout=20,
+            verify=_SSL,
+        )
+        r.raise_for_status()
+        if r.status_code != 200:
+            raise RuntimeError(f"unexpected HTTP {r.status_code}")
+        page_text = unquote(r.text)
+        if ats == "workday":
+            tokens = set()
+            for m in pattern.finditer(page_text):
+                tenant = m.group(1).lower()
+                wdv = m.group(2).lower()
+                path = m.group(3)
+                if (len(tenant) < _WD_MIN_TENANT_LEN
+                        or tenant in _DDG_NOISE_TOKENS
+                        or path.lower() in _DDG_NOISE_TOKENS):
+                    continue
+                tokens.add(f"{tenant}/{wdv}/{path}")
+            return tokens
+        return {
+            m.group(1).lower()
+            for m in pattern.finditer(page_text)
+            if m.group(1).lower() not in _DDG_NOISE_TOKENS
+        }
+    except Exception as exc:
+        _record_search_error("Google", ats, exc)
+        return set()
+
+
+def _brave_search_ats_tokens(ats, query):
+    """Search through Brave's authenticated API and extract ATS board tokens."""
+    pattern = _ATS_URL_PATTERNS.get(ats)
+    if not BRAVE_SEARCH_API_KEY or not pattern:
+        return set()
+    try:
+        r = requests.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": 20, "country": "IN", "search_lang": "en"},
+            headers={
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": BRAVE_SEARCH_API_KEY,
+            },
+            timeout=20,
+            verify=_SSL,
+        )
+        r.raise_for_status()
+        urls = "\n".join(item.get("url", "") for item in r.json().get("web", {}).get("results", []))
+        page_text = unquote(urls)
+        if ats == "workday":
+            tokens = set()
+            for m in pattern.finditer(page_text):
+                tenant, wdv, path = m.group(1).lower(), m.group(2).lower(), m.group(3)
+                if (len(tenant) >= _WD_MIN_TENANT_LEN
+                        and tenant not in _DDG_NOISE_TOKENS
+                        and path.lower() not in _DDG_NOISE_TOKENS):
+                    tokens.add(f"{tenant}/{wdv}/{path}")
+            return tokens
+        return {m.group(1).lower() for m in pattern.finditer(page_text)
+                if m.group(1).lower() not in _DDG_NOISE_TOKENS}
+    except Exception as exc:
+        _record_search_error("Brave", ats, exc)
+        return set()
+
+
+def _tavily_search_ats_tokens(ats, query):
+    """Search through Tavily's authenticated API and extract ATS board tokens."""
+    pattern = _ATS_URL_PATTERNS.get(ats)
+    if not TAVILY_API_KEY or not pattern:
+        return set()
+    try:
+        r = requests.post(
+            "https://api.tavily.com/search",
+            headers={"Authorization": f"Bearer {TAVILY_API_KEY}"},
+            json={"query": query, "search_depth": "basic", "max_results": 20},
+            timeout=20,
+            verify=_SSL,
+        )
+        r.raise_for_status()
+        urls = "\n".join(item.get("url", "") for item in r.json().get("results", []))
+        page_text = unquote(urls)
+        if ats == "workday":
+            tokens = set()
+            for m in pattern.finditer(page_text):
+                tenant, wdv, path = m.group(1).lower(), m.group(2).lower(), m.group(3)
+                if (len(tenant) >= _WD_MIN_TENANT_LEN
+                        and tenant not in _DDG_NOISE_TOKENS
+                        and path.lower() not in _DDG_NOISE_TOKENS):
+                    tokens.add(f"{tenant}/{wdv}/{path}")
+            return tokens
+        return {m.group(1).lower() for m in pattern.finditer(page_text)
+                if m.group(1).lower() not in _DDG_NOISE_TOKENS}
+    except Exception as exc:
+        _record_search_error("Tavily", ats, exc)
+        return set()
+
+
+def mode_discover_web(force_direct=False):
     """Search DuckDuckGo for companies posting India DevOps/SRE/Support jobs on all four
     ATS platforms (Greenhouse / Lever / Ashby / Workday).  Found tokens are tested against
-    the real APIs; only companies with actual India/APAC jobs are written into registry.py.
+    the real APIs; only companies with actual India/UAE/APAC jobs are written into registry.py.
 
     Usage:  python jobpull.py --discover-web
     """
     print("Web discovery: searching for India DevOps/SRE/Support roles on public ATS boards...\n")
 
+    _SEARCH_ERRORS.clear()
+    use_tavily_api = bool(TAVILY_API_KEY)
+    use_brave_api = bool(BRAVE_SEARCH_API_KEY) and not use_tavily_api
     existing_tokens = {(a, t.lower()) for _, a, t in SEED}
     candidates = []
     seen = set()
 
-    # Use Tor for IP rotation if it's running, otherwise fall back to plain sessions.
-    use_tor = _tor_running()
+    # Use Tor for IP rotation if it is running, unless the caller explicitly
+    # requests a direct search.  This is useful when a Tor exit is blocked.
+    use_tor = _tor_running() and not force_direct and not (use_tavily_api or use_brave_api)
+    if use_tavily_api:
+        print("  Tavily Search API enabled — using authenticated search results.\n")
+    elif use_brave_api:
+        print("  Brave Search API enabled — using authenticated search results.\n")
     if use_tor:
         print("  Tor detected — rotating exit-node IP between each engine call.\n")
         ddg_session  = _make_tor_session()
         bing_session = _make_tor_session()
+        google_session = _make_tor_session()
     else:
-        print("  Tor not running — using direct connection (start Tor to rotate IPs).\n")
+        if force_direct and _tor_running():
+            print("  Direct mode — bypassing the running Tor service.\n")
+        else:
+            print("  Tor not running — using direct connection (start Tor to rotate IPs).\n")
         ddg_session  = requests.Session()
         bing_session = requests.Session()
+        google_session = requests.Session()
+
+    tor_rotation_failed = False
 
     # Warm up both engines so sessions carry real cookies before firing searches.
     for warmup_url, sess, ua in [
@@ -1031,26 +1220,61 @@ def mode_discover_web():
         short_q = query[:55]
         print(f"  [{ats:11s}] {short_q}...", end=" ", flush=True)
 
+        api_tokens = (_tavily_search_ats_tokens(ats, query) if use_tavily_api
+                      else _brave_search_ats_tokens(ats, query) if use_brave_api else set())
+        if use_tavily_api or use_brave_api:
+            tokens = api_tokens
+            new_t = [t for t in tokens if (ats, t.lower()) not in existing_tokens and t not in seen]
+            for t in new_t:
+                seen.add(t)
+                candidates.append((f"[web] {t}", ats, t))
+            provider = "Tavily" if use_tavily_api else "Brave"
+            print(f"{provider}:{len(api_tokens)} new:{len(new_t)}")
+            continue
+
         ddg_tokens  = _ddg_search_ats_tokens(ats, query, _session=ddg_session)
         if use_tor:
-            _tor_new_identity()
+            tor_rotation_failed = not _tor_new_identity() or tor_rotation_failed
             ddg_session = _make_tor_session()
         else:
             time.sleep(2.0)
 
         bing_tokens = _bing_search_ats_tokens(ats, query, _session=bing_session)
         if use_tor:
-            _tor_new_identity()
+            tor_rotation_failed = not _tor_new_identity() or tor_rotation_failed
             bing_session = _make_tor_session()
+            google_session = _make_tor_session()
         else:
             time.sleep(2.0)
 
-        tokens = ddg_tokens | bing_tokens
+        # Google is a fallback, not a third request for every successful
+        # search. This keeps discovery useful when DDG/Bing serve empty bot
+        # challenge pages while limiting requests to Google.
+        google_tokens = set()
+        if not ddg_tokens and not bing_tokens:
+            google_tokens = _google_search_ats_tokens(
+                ats, query, _session=google_session
+            )
+            time.sleep(2.0)
+
+        tokens = ddg_tokens | bing_tokens | google_tokens
         new_t = [t for t in tokens if (ats, t) not in existing_tokens and t not in seen]
         for t in new_t:
             seen.add(t)
             candidates.append((f"[web] {t}", ats, t))
-        print(f"DDG:{len(ddg_tokens)} Bing:{len(bing_tokens)} new:{len(new_t)}")
+        print(f"DDG:{len(ddg_tokens)} Bing:{len(bing_tokens)} "
+              f"Google:{len(google_tokens)} new:{len(new_t)}")
+
+    if _SEARCH_ERRORS:
+        print("\n  Search access issues (results may be incomplete):")
+        for error in _SEARCH_ERRORS[:8]:
+            print(f"    {error}")
+        if len(_SEARCH_ERRORS) > 8:
+            print(f"    ... and {len(_SEARCH_ERRORS) - 8} more")
+        if use_tor:
+            print("  Try: python3 jobpull.py --discover-web --direct")
+    if tor_rotation_failed:
+        print("  Warning: Tor rejected at least one identity rotation; results may use a blocked exit node.")
 
     if not candidates:
         print("\n  No new candidates found. Both DDG and Bing returned nothing — try again later (rate limits) or start Tor.")
@@ -1084,7 +1308,7 @@ def mode_discover_web():
     print()
 
     if not to_add:
-        print("  Candidates found but none have India/APAC jobs right now.")
+        print("  Candidates found but none have India/UAE/APAC jobs right now.")
         return
 
     to_add.sort(key=lambda x: (-x[4], -x[3]))
@@ -1092,7 +1316,7 @@ def mode_discover_web():
     for display, ats, token, india_n, kw_n in to_add:
         star = "**" if kw_n > 0 else "  "
         print(f"  {star} {display:32s} ({ats:11s}) "
-              f"— {india_n} India/APAC jobs, {kw_n} keyword-match")
+              f"— {india_n} India/UAE/APAC jobs, {kw_n} keyword-match")
 
     import importlib, registry as _reg_mod
     importlib.reload(_reg_mod)
@@ -1210,6 +1434,6 @@ if __name__ == "__main__":
     elif "--smoke-test" in sys.argv:
         mode_smoke_test()
     elif "--discover-web" in sys.argv:
-        mode_discover_web()
+        mode_discover_web(force_direct="--direct" in sys.argv)
     else:
         mode_scan()
